@@ -1,0 +1,91 @@
+version: '3.7'
+
+services:
+  db:
+    image: bitnami/mysql:8.3.0
+    ports:
+      # 3306 is used by ProxySQL
+      - 127.0.0.1:6033:3306
+    volumes:
+      # certs
+      - ./certs:/certs
+      # config
+      - ./docker/db/config/primary.cnf:/opt/bitnami/mysql/conf/my_custom.cnf:ro
+      # sql setup
+      - ./docker/db/srv:/srv
+      - ./docker/db/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
+      # persistence
+      - mysql-backups:/db-state/backups
+      - mysql-data:/bitnami/mysql/data
+    environment:
+      ALLOW_EMPTY_PASSWORD: yes
+      MYSQL_ROOT_PASSWORD: labPass
+      MYSQL_EXTRA_FLAGS: "--general_log=1 --general_log_file=/bitnami/mysql/db_general_log_running.txt"
+      MYSQL_REPLICATION_MODE: master
+      MYSQL_REPLICATION_USER: replicant
+      MYSQL_REPLICATION_PASSWORD: labPass
+    healthcheck:
+      test: ["CMD-SHELL", "mysql classicmodels --user=root --password=labPass -P 6033 --silent --execute 'SELECT 1' | grep '1'"]
+      start_period: 90s
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      proxysql:
+        condition: service_started
+      db-replica:
+        condition: service_started
+
+  db-replica:
+    image: bitnami/mysql:8.3.0
+    ports:
+      # use different port, since 3306 is used by ProxySQL and 6033 to be the main db
+      - 127.0.0.1:6034:3306
+    volumes:
+      # certs
+      - ./certs:/certs
+      # config
+      - ./docker/db/config/replica.cnf:/opt/bitnami/mysql/conf/my_custom.cnf:ro
+      # persistence
+      - mysql-replica-data:/bitnami/mysql/data
+      - mysql-replica-backups:/db-state/backups
+    environment:
+      ALLOW_EMPTY_PASSWORD: yes
+      MYSQL_EXTRA_FLAGS: "--general_log=1 --general_log_file=/bitnami/mysql/db_general_log_running.txt"
+      MYSQL_REPLICATION_MODE: slave
+      MYSQL_REPLICATION_USER: replicant
+      MYSQL_REPLICATION_PASSWORD: labPass
+      MYSQL_MASTER_HOST: db
+      MYSQL_MASTER_PORT_NUMBER: 3306
+      MYSQL_MASTER_ROOT_PASSWORD: labPass
+      MYSQL_REPLICATION_SLAVE_DUMP: true
+    healthcheck:
+      test: ["CMD-SHELL", "mysql --user=root --password=labPass --silent --execute 'show slave status \\G;' | grep -E 'Slave_IO_Running: Yes|Slave_SQL_Running: Yes|Last_Errno: 0' | wc -l | grep 3"]
+      start_period: 90s
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  proxysql:
+    image: proxysql/proxysql:2.5.5
+    ports:
+      # proxysql admin port
+      - 127.0.0.1:6032:6032
+      # proxysql database port - forwards to hosting
+      - 127.0.0.1:3306:3306
+    volumes:
+      - ./docker/proxysql/proxysql.cnf:/etc/proxysql.cnf
+      - ./certs/ca.crt:/var/lib/proxysql/proxysql-ca.pem
+      - ./certs/wildcard.crt:/var/lib/proxysql/proxysql-cert.pem
+      - ./certs/wildcard.key:/var/lib/proxysql/proxysql-key.pem
+    healthcheck:
+      test: mysql -h127.0.0.1 -uradmin -pradmin -P6032 --ssl-ca=/var/lib/proxysql/proxysql-ca.pem --execute "SELECT 1"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  mysql-data:
+  mysql-backups:
+  mysql-replica-data:
+  mysql-replica-backups:

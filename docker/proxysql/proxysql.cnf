@@ -1,0 +1,102 @@
+datadir="/var/lib/proxysql"
+
+admin_variables=
+{
+  admin_credentials="admin:admin;radmin:radmin"
+  mysql_ifaces="0.0.0.0:6032"
+}
+
+# these settings are primarily from
+mysql_variables=
+{
+  threads=4
+  max_connections=2048
+  default_query_delay=0
+  default_query_timeout=36000000
+  have_compress=true
+  poll_timeout=2000
+  interfaces="0.0.0.0:3306"
+  default_schema="information_schema"
+  stacksize=1048576
+  server_version="5.5.30"
+  connect_timeout_server=3000
+  monitor_username="docker"
+  monitor_password="labPass"
+  monitor_history=600000
+  monitor_connect_interval=60000
+  monitor_ping_interval=10000
+  monitor_read_only_interval=1500
+  monitor_read_only_timeout=500
+  ping_interval_server_msec=120000
+  ping_timeout_server=500
+  commands_stats=true
+  sessions_sort=true
+  connect_retries_on_failure=10
+  have_ssl=true
+  default_charset = "latin1"
+  default_collation_connection = "latin1_swedish_ci"
+  default_tx_isolation = "REPEATABLE-READ"
+  
+  # DEBUG
+  eventslog_filename = "/queries.log"
+  eventslog_default_log = 1
+  eventslog_format = 2
+}
+
+mysql_servers=
+(
+  {
+    address="db"
+    port=3306
+    hostgroup=1
+    max_connections=100
+    use_ssl=1
+    comment="Primary DB"
+  },
+  # 30s replica group (3)
+  {
+    address="db-replica"
+    port=3306
+    hostgroup=3
+    max_connection=100
+    use_ssl=1
+    max_replication_lag=30
+    weight=100
+    comment="Read Replica, 30s tolerance"
+  },
+  {
+    address="db"
+    port=3306
+    hostgroup=3
+    max_connections=100
+    use_ssl=1
+    max_replication_lag=0
+    weight=1
+    comment="Primary Fallback"
+  }
+)
+
+mysql_users=
+(
+  {
+    username = "docker"
+    password = "labPass"
+    default_hostgroup = 1
+    max_connections=1000
+    default_schema="information_schema"
+    transaction_persistent = 1
+    active = 1
+  }
+)
+
+mysql_query_rules=
+(
+  {
+    rule_id = 2
+    active = 1
+    match_pattern = "^SELECT\s*\/\*\s*REDIRECTION\_TEST\s*\*\/"
+    apply = 1
+    destination_hostgroup = 3
+    comment = "Send all traffic with REDIRECTION_TEST to read-replica"
+  }
+)
